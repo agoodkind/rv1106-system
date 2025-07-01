@@ -468,6 +468,15 @@ rootfs_prepare: prepare
 	popd
 
 ##########################################################################################
+#	install entware
+##########################################################################################
+entware: prepare
+	@echo -e "$(C_GREEN) ==sysdrv== install entware   $(C_NORMAL)"
+	@mkdir -p $(SYSDRV_DIR_OUT_ROOTFS)/usr/sbin
+	wget -O $(SYSDRV_DIR_OUT_ROOTFS)/usr/sbin/entware-install.sh https://bin.entware.net/armv7sf-k3.2/installer/generic.sh
+	chmod +x $(SYSDRV_DIR_OUT_ROOTFS)/usr/sbin/entware-install.sh
+
+##########################################################################################
 #	build busybox
 ##########################################################################################
 busybox_menuconfig:
@@ -563,7 +572,7 @@ drv_clean:
 #	build rootfs
 ##########################################################################################
 
-rootfs: rootfs_prepare pctools busybox boardtools drv
+rootfs: rootfs_prepare entware pctools busybox boardtools drv
 	@echo -e "$(C_GREEN) ==sysdrv== build rootfs  $(C_NORMAL)"
 	make -C $(SYSDRV_DIR) strip
 	pushd $(SYSDRV_DIR)/out; \
