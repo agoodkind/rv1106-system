@@ -59,11 +59,39 @@ execute_ssh() {
     fi
 }
 
+# Function to show usage
+show_usage() {
+    echo "Usage: $0 <command> [options]"
+    echo ""
+    echo "Commands:"
+    echo "  build              Build the firmware only"
+    echo "  upload             Upload and update existing firmware"
+    echo "  build_and_upload   Build firmware and then upload it"
+    echo ""
+    echo "Options:"
+    echo "  --ip <IP>          Device IP address (default: 192.168.1.100)"
+    echo "  --user <USER>      SSH username (default: root)"
+    echo "  --port <PORT>      SSH port (default: 22)"
+    echo "  --dry-run          Run in dry run mode (show what would be done without executing)"
+    echo ""
+    echo "Examples:"
+    echo "  Build only:           $0 build"
+    echo "  Upload only:          $0 upload --ip 192.168.1.100"
+    echo "  Build and upload:     $0 build_and_upload --ip 192.168.1.100"
+    echo "  Dry run build:        $0 build --dry-run"
+}
+
 # Function to check if required tools are installed
 check_dependencies() {
     print_status "Checking dependencies..."
     
-    local deps=("tar" "ssh")
+    local deps=("tar")
+    
+    # Only check for ssh if we're going to upload
+    if [ "$COMMAND" = "upload" ] || [ "$COMMAND" = "build_and_upload" ]; then
+        deps+=("ssh")
+    fi
+    
     for dep in "${deps[@]}"; do
         if ! command -v "$dep" &> /dev/null; then
             print_error "$dep is not installed. Please install it first."
@@ -122,6 +150,7 @@ upload_firmware() {
     # Check if file exists
     if [ "$DRY_RUN" = false ] && [ ! -f "$update_file_path" ]; then
         print_error "Update file not found: $update_file_path"
+        print_error "Please build the firmware first or ensure the update file exists."
         exit 1
     fi
     
@@ -240,12 +269,105 @@ verify_update() {
     fi
 }
 
+# Function to test SSH connection
+test_ssh_connection() {
+    print_status "Testing SSH connection..."
+    if [ "$DRY_RUN" = true ]; then
+        print_dry_run "Would test SSH connection to ${DEVICE_USER}@${DEVICE_IP}:${SSH_PORT}"
+        print_status "SSH connection successful! (dry run)"
+    else
+        if ! ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p "$SSH_PORT" \
+            "${DEVICE_USER}@${DEVICE_IP}" "echo 'SSH connection successful'" &> /dev/null; then
+            print_error "Failed to connect to device. Please check:"
+            print_error "  - SSH key is properly configured"
+            print_error "  - Device IP address is correct"
+            print_error "  - Device is powered on and accessible"
+            exit 1
+        fi
+        print_status "SSH connection successful!"
+    fi
+}
+
+# Function to handle build command
+cmd_build() {
+    print_status "JetKVM Firmware Build"
+    print_status "===================="
+    
+    if [ "$DRY_RUN" = true ]; then
+        print_warning "Running in DRY RUN mode - no actual changes will be made"
+    fi
+    
+    check_dependencies
+    build_firmware
+    
+    if [ "$DRY_RUN" = true ]; then
+        print_status "Dry run completed successfully! No actual changes were made."
+    else
+        print_status "Firmware build completed successfully!"
+        print_status "To upload the firmware, run: $0 upload --ip <DEVICE_IP>"
+    fi
+}
+
+# Function to handle upload command
+cmd_upload() {
+    print_status "JetKVM Firmware Upload and Update"
+    print_status "================================="
+    
+    if [ "$DRY_RUN" = true ]; then
+        print_warning "Running in DRY RUN mode - no actual changes will be made"
+    fi
+    
+    print_status "Target device: ${DEVICE_USER}@${DEVICE_IP}:${SSH_PORT}"
+    print_status "Using SSH key authentication"
+    
+    test_ssh_connection
+    check_dependencies
+    
+    upload_firmware
+    perform_ota_update
+    
+    # Wait for device to reboot
+    if [ "$DRY_RUN" = true ]; then
+        print_dry_run "Would wait 10 seconds before checking device status"
+    else
+        sleep 10  # Give device time to start rebooting
+    fi
+    wait_for_device
+    
+    verify_update
+    
+    if [ "$DRY_RUN" = true ]; then
+        print_status "Dry run completed successfully! No actual changes were made."
+    else
+        print_status "Firmware upload and update completed successfully!"
+    fi
+}
+
+# Function to handle build_and_upload command
+cmd_build_and_upload() {
+    print_status "JetKVM Firmware Build and Update"
+    print_status "================================"
+    
+    # First build the firmware
+    cmd_build
+    
+    # Then upload it
+    cmd_upload
+}
+
 # Main execution
 main() {
-    print_status "JetKVM Firmware Build and Update Script"
-    print_status "======================================="
+    # Check if no arguments provided
+    if [ $# -eq 0 ]; then
+        show_usage
+        exit 0
+    fi
     
-    # Parse command line arguments
+    # Get the command
+    COMMAND="$1"
+    shift  # Remove command from arguments
+    
+    # Parse remaining options
     while [[ $# -gt 0 ]]; do
         case $1 in
             --ip)
@@ -260,87 +382,43 @@ main() {
                 SSH_PORT="$2"
                 shift 2
                 ;;
-            --skip-build)
-                SKIP_BUILD=true
-                shift
-                ;;
             --dry-run)
                 DRY_RUN=true
                 shift
                 ;;
-            --help)
-                echo "Usage: $0 [options]"
-                echo "Options:"
-                echo "  --ip <IP>           Device IP address (default: 192.168.1.100)"
-                echo "  --user <USER>       SSH username (default: root)"
-                echo "  --port <PORT>       SSH port (default: 22)"
-                echo "  --skip-build        Skip building firmware, use existing file"
-                echo "  --dry-run           Run in dry run mode (show what would be done without executing)"
-                echo "  --help              Show this help message"
+            --help|-h)
+                show_usage
                 exit 0
                 ;;
             *)
                 print_error "Unknown option: $1"
+                show_usage
                 exit 1
                 ;;
         esac
     done
     
-    if [ "$DRY_RUN" = true ]; then
-        print_warning "Running in DRY RUN mode - no actual changes will be made"
-    fi
-    
-    print_status "Target device: ${DEVICE_USER}@${DEVICE_IP}:${SSH_PORT}"
-    print_status "Using SSH key authentication"
-    
-    # Test SSH connection
-    print_status "Testing SSH connection..."
-    if [ "$DRY_RUN" = true ]; then
-        print_dry_run "Would test SSH connection to ${DEVICE_USER}@${DEVICE_IP}:${SSH_PORT}"
-        print_status "SSH connection successful! (dry run)"
-    else
-        if ! ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p "$SSH_PORT" \
-            "${DEVICE_USER}@${DEVICE_IP}" "echo 'SSH connection successful'" &> /dev/null; then
-            print_error "Failed to connect to device. Please check:"
-            print_error "  - SSH key is properly configured"
-            print_error "  - Device IP address is correct"
-            print_error "  - Device is powered on and accessible"
+    # Execute the appropriate command
+    case "$COMMAND" in
+        build)
+            cmd_build
+            ;;
+        upload)
+            cmd_upload
+            ;;
+        build_and_upload)
+            cmd_build_and_upload
+            ;;
+        --help|-h|help)
+            show_usage
+            exit 0
+            ;;
+        *)
+            print_error "Unknown command: $COMMAND"
+            show_usage
             exit 1
-        fi
-    fi
-    
-    # Check dependencies
-    check_dependencies
-    
-    # Build firmware unless skipped
-    if [ "$SKIP_BUILD" != "true" ]; then
-        build_firmware
-    else
-        print_warning "Skipping firmware build, using existing file..."
-    fi
-    
-    # Upload firmware
-    upload_firmware
-    
-    # Perform OTA update
-    perform_ota_update
-    
-    # Wait for device to reboot
-    if [ "$DRY_RUN" = true ]; then
-        print_dry_run "Would wait 10 seconds before checking device status"
-    else
-        sleep 10  # Give device time to start rebooting
-    fi
-    wait_for_device
-    
-    # Verify update
-    verify_update
-    
-    if [ "$DRY_RUN" = true ]; then
-        print_status "Dry run completed successfully! No actual changes were made."
-    else
-        print_status "Firmware update completed successfully!"
-    fi
+            ;;
+    esac
 }
 
 # Run main function

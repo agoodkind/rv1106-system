@@ -1,9 +1,25 @@
 #!/bin/bash
-set -eE
+# set -eE
 
 export LC_ALL=C
 export LD_LIBRARY_PATH=
 RECORD_IFS="$IFS"
+
+# Add realpath function for systems without it
+if ! command -v realpath >/dev/null 2>&1; then
+	realpath() {
+		OURPWD=$PWD
+		cd "$(dirname "$1")"
+		LINK=$(readlink "$(basename "$1")")
+		while [ "$LINK" ]; do
+			cd "$(dirname "$LINK")"
+			LINK=$(readlink "$(basename "$1")")
+		done
+		REALPATH="$PWD/$(basename "$1")"
+		cd "$OURPWD"
+		echo "$REALPATH"
+	}
+fi
 
 function unset_env_config_rk()
 {
@@ -34,7 +50,7 @@ GLOBAL_INITRAMFS_BOOT_NAME=""
 GLOBAL_PARTITIONS=""
 GLOBAL_SDK_VERSION=""
 
-export RK_JOBS=$((`getconf _NPROCESSORS_ONLN` / 2 + 1 ))
+export RK_JOBS=$(($(getconf _NPROCESSORS_ONLN) + 1 ))
 export RK_BUILD_VERSION_TYPE=RELEASE
 
 export SDK_ROOT_DIR=$SDK_ROOT_DIR
@@ -84,19 +100,23 @@ C_CYAN="\e[36;1m"
 C_WHITE="\e[37;1m"
 C_NORMAL="\033[0m"
 
+C_RED_BG="\e[41;1;30m"
+C_YELLOW_BG="\e[1;33m"
+C_NORMAL_BG="\033[0m"
+
 function msg_info()
 {
-	echo -e "${C_GREEN}[$(basename $0):info] $1${C_NORMAL}"
+	printf "${C_GREEN}[$(basename $0):info] %s${C_NORMAL}\n" "$1"
 }
 
 function msg_warn()
 {
-	echo -e "${C_YELLOW}[$(basename $0):warn] $1${C_NORMAL}"
+	printf "${C_YELLOW}[$(basename $0):warn] %s${C_NORMAL}\n" "$1"
 }
 
 function msg_error()
 {
-	echo -e "${C_RED}[$(basename $0):error] $1${C_NORMAL}"
+	printf "${C_RED}[$(basename $0):error] %s${C_NORMAL}\n" "$1"
 }
 
 err_handler() {
@@ -145,7 +165,7 @@ function choose_target_board()
 	do
 		local f0 boot_medium ddr pmic hardware_version product_name
 		echo "----------------------------------------------------------------"
-		echo -e "${C_GREEN}$cnt. $item${C_NORMAL}"
+		printf "${C_GREEN}%d. %s${C_NORMAL}\n" "$cnt" "$item"
 		cnt=$(( cnt + 1 ))
 		f0=${item#BoardConfig*-}
 		boot_medium=${f0%%-*}
@@ -210,8 +230,9 @@ function build_select_board()
 	fi
 
 	rm -f $BOARD_CONFIG
-	ln -rfs $TARGET_PRODUCT_DIR/$RK_BUILD_TARGET_BOARD $BOARD_CONFIG
-	msg_info "switching to board: `realpath $BOARD_CONFIG`"
+
+	ln -fs "$TARGET_PRODUCT_DIR/$RK_BUILD_TARGET_BOARD" $BOARD_CONFIG
+	msg_info "switching to board: $(realpath "$BOARD_CONFIG")"
 
 	if [ "$1" = "LUNCH-FORCE" ]; then
 		finish_build
@@ -231,7 +252,7 @@ function usagemedia()
 {
 	check_config RK_KERNEL_DTS RK_KERNEL_DEFCONFIG || return 0
 
-	echo -e "make -C ${SDK_MEDIA_DIR}"
+	printf "make -C %s\n" "${SDK_MEDIA_DIR}"
 
 	finish_build
 }
@@ -251,10 +272,10 @@ function usagekernel()
 {
 	check_config RK_KERNEL_DTS RK_KERNEL_DEFCONFIG || return 0
 
-	echo -e "make kernel -C ${SDK_SYSDRV_DIR} ${_FDS} \
-		KERNEL_CFG=${RK_KERNEL_DEFCONFIG} ${_FDS} \
-		KERNEL_DTS=${RK_KERNEL_DTS} ${_FDS} \
-		KERNEL_CFG_FRAGMENT=${RK_KERNEL_DEFCONFIG_FRAGMENT}"
+	printf "make kernel -C %s %s \
+		KERNEL_CFG=%s %s \
+		KERNEL_DTS=%s %s \
+		KERNEL_CFG_FRAGMENT=%s\n" "${SDK_SYSDRV_DIR}" "${_FDS}" "${RK_KERNEL_DEFCONFIG}" "${_FDS}" "${RK_KERNEL_DTS}" "${_FDS}" "${RK_KERNEL_DEFCONFIG_FRAGMENT}"
 
 	finish_build
 }
@@ -263,9 +284,9 @@ function usageuboot()
 {
 	check_config RK_UBOOT_DEFCONFIG || return 0
 
-	echo -e "make uboot -C ${SDK_SYSDRV_DIR} ${_FDS}  \
-		UBOOT_CFG=${RK_UBOOT_DEFCONFIG} ${_FDS} \
-		UBOOT_CFG_FRAGMENT=${RK_UBOOT_DEFCONFIG_FRAGMENT}"
+	printf "make uboot -C %s %s \
+		UBOOT_CFG=%s %s \
+		UBOOT_CFG_FRAGMENT=%s\n" "${SDK_SYSDRV_DIR}" "${_FDS}" "${RK_UBOOT_DEFCONFIG}" "${_FDS}" "${RK_UBOOT_DEFCONFIG_FRAGMENT}"
 
 	finish_build
 }
@@ -273,7 +294,7 @@ function usageuboot()
 function usagerootfs()
 {
 	# check_config RK_ROOTFS_IMG || return 0
-	echo -e "make rootfs -C ${SDK_SYSDRV_DIR} "
+	printf "make rootfs -C %s\n" "${SDK_SYSDRV_DIR}"
 
 	finish_build
 }
@@ -415,21 +436,21 @@ function build_check_power_domain(){
 	while read -r regulator_val
 	do
 		if echo ${regulator_val} | grep supply &>/dev/null; then
-			echo -e "\n\n\e[1;33m${regulator_val%*=}\e[0m" >> $tmp_final_target
+			printf "\n\n${C_YELLOW_BG}%s${C_NORMAL_BG}\n" "${regulator_val%*=}" >> $tmp_final_target
 		else
 			tmp_none_item=${regulator_val##*<}
 			tmp_none_item=${tmp_none_item%%>*}
-			echo -e "${regulator_val%%<*} \e[1;31m$(( $tmp_none_item / 1000 ))mV\e[0m" >> $tmp_final_target
+			printf "%s ${C_RED_BG}%dmV${C_NORMAL_BG}\n" "${regulator_val%%<*}" "$(( $tmp_none_item / 1000 ))" >> $tmp_final_target
 		fi
 	done < $tmp_regulator_microvolt_file
 
-	echo -e "\e[41;1;30m PLEASE CHECK BOARD GPIO POWER DOMAIN CONFIGURATION !!!!!\e[0m"
-	echo -e "\e[41;1;30m <<< ESPECIALLY Wi-Fi/Flash/Ethernet IO power domain >>> !!!!!\e[0m"
-	echo -e "\e[41;1;30m Check Node [pmu_io_domains] in the file: ${kernel_file_dtb_dts}.dts \e[0m"
+	printf "${C_RED_BG}PLEASE CHECK BOARD GPIO POWER DOMAIN CONFIGURATION !!!!!${C_NORMAL_BG}\n"
+	printf "${C_RED_BG} <<< ESPECIALLY Wi-Fi/Flash/Ethernet IO power domain >>> !!!!!${C_NORMAL_BG}\n"
+	printf "${C_RED_BG} Check Node [pmu_io_domains] in the file: %s.dts ${C_NORMAL_BG}\n" "${kernel_file_dtb_dts}"
 	echo
-	echo -e "\e[41;1;30m 请再次确认板级的电源域配置！！！！！！\e[0m"
-	echo -e "\e[41;1;30m <<< 特别是Wi-Fi，FLASH，以太网这几路IO电源的配置 >>> ！！！！！\e[0m"
-	echo -e "\e[41;1;30m 检查内核文件 ${kernel_file_dtb_dts}.dts 的节点 [pmu_io_domains] \e[0m"
+	printf "${C_RED_BG}请再次确认板级的电源域配置！！！！！！${C_NORMAL_BG}\n"
+	printf "${C_RED_BG} <<< 特别是Wi-Fi，FLASH，以太网这几路IO电源的配置 >>> ！！！！！${C_NORMAL_BG}\n"
+	printf "${C_RED_BG} 检查内核文件 %s.dts 的节点 [pmu_io_domains] ${C_NORMAL_BG}\n" "${kernel_file_dtb_dts}"
 	cat $tmp_final_target
 
 	rm -f $dump_kernel_dtb_file
