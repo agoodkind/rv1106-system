@@ -194,7 +194,15 @@ cd /Volumes/CaseSensitive
 git clone git@github.com:jetkvm/rv1106-system.git
 ```
 
-### Libraries used by this repo may not existing for arm64 architectures
+You can use the included script to automate this process:
+
+`chmod +x ./tools/macos/launch_rv1106_vscode_macos.sh && ./tools/macos/launch_rv1106_vscode_macos.sh`
+
+This will create, mount, and clone into the image, then it will launch VScode against it. 
+
+### Libraries used by this repo may not exist for arm64 architectures
 Packages like `g++-multilib` and `gcc-multilib` are not published to the standard debian apt repositories for amd64. You may need to resort to running this on an x86/amd64 machine, or in a virtual machine/devcontainer for amd64.
+
+If using VSCode on macOS make sure to launch into the devcontainer which automatically includes the amd64 image with all the necessary build tools.
 
 Happy Building - With this SDK, you’ll have full control of your JetKVM firmware—tailoring it to your hardware, storage preferences, and custom application needs.

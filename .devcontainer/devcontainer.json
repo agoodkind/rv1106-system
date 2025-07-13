@@ -1,6 +1,22 @@
 {
-	"name": "JetKVM",
-	"image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
-	"runArgs": ["--platform=linux/amd64" ],
-	"features": {}
+	"name": "RV1106-System",
+	"image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+	"runArgs": [
+		"--platform=linux/amd64"
+	],
+	"mounts": [
+		"source=${localEnv:HOME}/.ssh,target=/root/.ssh,type=bind,consistency=cached"
+	],
+	"postCreateCommand": "chmod +x ./install_dependencies.sh && ./install_dependencies.sh",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"bmalehorn.shell-syntax",
+				"foxundermoon.shell-format",
+				"ms-vscode.makefile-tools",
+				"timonwong.shellcheck",
+				"GitHub.vscode-pull-request-github"
+			]
+		}
+	}
 }
